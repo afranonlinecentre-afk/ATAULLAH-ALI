@@ -1,0 +1,114 @@
+name: Build Android APK (AFRAN ONLINE CENTRE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build Type'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+  push:
+    branches:
+      - main
+      - master
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    name: Build & Package Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 2. Setup Node.js (v20)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 3. Install Node Dependencies
+        run: |
+          echo "Installing dependencies..."
+          npm ci || npm install
+
+      - name: 4. Setup Java JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: 5. Configure Android SDK Environment
+        run: |
+          echo "Setting up Android SDK environment..."
+          if [ -n "$ANDROID_SDK_ROOT" ]; then
+            echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          fi
+          # Accept any pending Android licenses
+          mkdir -p ~/.android
+          touch ~/.android/repositories.cfg
+          yes | sdkmanager --licenses || true
+
+      - name: 6. Build Vite React Web App (dist)
+        run: |
+          echo "Building production web assets..."
+          npm run build
+          if [ ! -f "dist/index.html" ]; then
+            echo "Error: dist/index.html was not generated!"
+            exit 1
+          fi
+          echo "Web build successful."
+
+      - name: 7. Initialize & Sync Capacitor Android Project
+        run: |
+          echo "Checking Capacitor Android project..."
+          if [ ! -d "android" ]; then
+            echo "Generating native Android project with Capacitor..."
+            npx cap add android
+          else
+            echo "Native Android project directory exists."
+          fi
+          echo "Syncing web assets to native Android project..."
+          npx cap sync android
+
+      - name: 8. Grant Execute Permissions to Gradle Wrapper
+        run: |
+          cd android
+          chmod +x gradlew
+          ls -la gradlew
+
+      - name: 9. Build Android APK via Gradle
+        run: |
+          cd android
+          echo "Running Gradle build..."
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: 10. Verify Output APK Binary
+        run: |
+          APK_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$APK_PATH" ]; then
+            echo "FATAL ERROR: Expected APK file does not exist at $APK_PATH"
+            echo "Build failed to generate an APK binary."
+            exit 1
+          fi
+          echo "APK successfully compiled!"
+          cp "$APK_PATH" ./AFRAN_ONLINE_CENTRE.apk
+          ls -lh AFRAN_ONLINE_CENTRE.apk
+          sha256sum AFRAN_ONLINE_CENTRE.apk
+
+      - name: 11. Upload APK Artifact (Direct Phone Download)
+        uses: actions/upload-artifact@v4
+        with:
+          name: AFRAN_ONLINE_CENTRE-APK
+          path: AFRAN_ONLINE_CENTRE.apk
+          if-no-files-found: error
+          retention-days: 30

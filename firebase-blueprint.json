@@ -1,0 +1,208 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Registered customer or administrator profile",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "phoneNumber": { "type": "string", "maxLength": 20 },
+        "email": { "type": "string", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["customer", "ownerAdmin"] },
+        "preferredLanguage": { "type": "string", "enum": ["bn", "en"] },
+        "accountStatus": { "type": "string", "enum": ["active", "suspended"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "phoneNumber", "role", "preferredLanguage"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Authorized Owner Admin identity record",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 120 },
+        "phoneNumber": { "type": "string", "maxLength": 20 },
+        "role": { "type": "string", "enum": ["ownerAdmin"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "role"]
+    },
+    "Service": {
+      "title": "Service",
+      "description": "Configurable government/digital assistance service entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "titleBn": { "type": "string", "maxLength": 120 },
+        "titleEn": { "type": "string", "maxLength": 120 },
+        "categoryId": { "type": "string", "maxLength": 64 },
+        "categoryNameBn": { "type": "string", "maxLength": 100 },
+        "categoryNameEn": { "type": "string", "maxLength": 100 },
+        "descriptionBn": { "type": "string", "maxLength": 1000 },
+        "descriptionEn": { "type": "string", "maxLength": 1000 },
+        "active": { "type": "boolean" },
+        "officialFee": { "type": "number" },
+        "serviceCharge": { "type": "number" },
+        "requiredDocuments": { "type": "string", "maxLength": 2000 },
+        "officialPortalUrl": { "type": "string", "maxLength": 300 },
+        "authorizationRequirement": { "type": "string", "maxLength": 300 },
+        "formSchema": { "type": "string", "maxLength": 10000 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "titleBn", "titleEn", "categoryId", "active"]
+    },
+    "Application": {
+      "title": "Application",
+      "description": "Service application submitted by a customer",
+      "type": "object",
+      "properties": {
+        "applicationId": { "type": "string", "maxLength": 64 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "serviceId": { "type": "string", "maxLength": 64 },
+        "serviceNameSnapshot": { "type": "string", "maxLength": 200 },
+        "customerName": { "type": "string", "maxLength": 120 },
+        "customerPhone": { "type": "string", "maxLength": 20 },
+        "formData": { "type": "string", "maxLength": 20000 },
+        "documentReferences": { "type": "string", "maxLength": 20000 },
+        "status": {
+          "type": "string",
+          "enum": ["Draft", "Submitted", "Under Review", "Need Documents", "Processing", "Completed", "Rejected", "Cancelled"]
+        },
+        "customerVisibleMessage": { "type": "string", "maxLength": 1000 },
+        "paymentStatus": {
+          "type": "string",
+          "enum": ["Unpaid", "Payment Pending", "Paid", "Refunded", "Waived"]
+        },
+        "serviceCharge": { "type": "number" },
+        "officialFee": { "type": "number" },
+        "assignedOwnerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["applicationId", "ownerUid", "serviceId", "customerName", "customerPhone", "status"]
+    },
+    "StatusHistory": {
+      "title": "StatusHistory",
+      "description": "Audit record of status transition for an application",
+      "type": "object",
+      "properties": {
+        "previousStatus": { "type": "string", "maxLength": 50 },
+        "newStatus": { "type": "string", "maxLength": 50 },
+        "actorUid": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string" },
+        "customerMessage": { "type": "string", "maxLength": 1000 },
+        "internalNote": { "type": "string", "maxLength": 2000 }
+      },
+      "required": ["previousStatus", "newStatus", "actorUid", "timestamp"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Application conversation message between customer and centre",
+      "type": "object",
+      "properties": {
+        "senderUid": { "type": "string", "maxLength": 128 },
+        "senderName": { "type": "string", "maxLength": 100 },
+        "message": { "type": "string", "maxLength": 2000 },
+        "visibleToCustomer": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["senderUid", "message", "visibleToCustomer", "createdAt"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Payment record for an application",
+      "type": "object",
+      "properties": {
+        "applicationId": { "type": "string", "maxLength": 64 },
+        "customerUid": { "type": "string", "maxLength": 128 },
+        "amount": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 10 },
+        "paymentMethod": { "type": "string", "maxLength": 50 },
+        "paymentStatus": {
+          "type": "string",
+          "enum": ["Unpaid", "Payment Pending", "Paid", "Refunded", "Waived"]
+        },
+        "transactionReference": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["applicationId", "customerUid", "amount", "paymentStatus"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Customer notification message",
+      "type": "object",
+      "properties": {
+        "recipientUid": { "type": "string", "maxLength": 128 },
+        "applicationId": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 200 },
+        "body": { "type": "string", "maxLength": 1000 },
+        "readAt": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["recipientUid", "title", "body", "createdAt"]
+    },
+    "AdminConfig": {
+      "title": "AdminConfig",
+      "description": "Centre configuration, contact details, and announcements",
+      "type": "object",
+      "properties": {
+        "centreNameBn": { "type": "string", "maxLength": 150 },
+        "centreNameEn": { "type": "string", "maxLength": 150 },
+        "centrePhone": { "type": "string", "maxLength": 25 },
+        "centreEmail": { "type": "string", "maxLength": 100 },
+        "centreAddressBn": { "type": "string", "maxLength": 500 },
+        "centreAddressEn": { "type": "string", "maxLength": 500 },
+        "operatingHoursBn": { "type": "string", "maxLength": 200 },
+        "operatingHoursEn": { "type": "string", "maxLength": 200 },
+        "upiId": { "type": "string", "maxLength": 100 },
+        "noticeBn": { "type": "string", "maxLength": 1000 },
+        "noticeEn": { "type": "string", "maxLength": 1000 },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["centreNameBn", "centreNameEn", "centrePhone"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profile with language preference and phone number"
+    },
+    "/admins/{uid}": {
+      "schema": "Admin",
+      "description": "System admin mapping document for owner authorization"
+    },
+    "/services/{serviceId}": {
+      "schema": "Service",
+      "description": "Public catalog of online government assistance services"
+    },
+    "/applications/{applicationId}": {
+      "schema": "Application",
+      "description": "Submitted citizen applications with status tracking"
+    },
+    "/applications/{applicationId}/status_history/{historyId}": {
+      "schema": "StatusHistory",
+      "description": "Status progression timeline and audit trail"
+    },
+    "/applications/{applicationId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Application specific customer-owner messages"
+    },
+    "/payments/{paymentId}": {
+      "schema": "Payment",
+      "description": "Payment records and receipts"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "In-app notifications for customers"
+    },
+    "/admin_config/{configId}": {
+      "schema": "AdminConfig",
+      "description": "Centre contact info, notice board, and operating hours"
+    }
+  }
+}

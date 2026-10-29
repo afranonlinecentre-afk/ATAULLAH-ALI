@@ -1,0 +1,178 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default deny all unmapped access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened Global Helpers
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Zero-Trust Owner Admin Verification:
+    // 1. Phone number MUST be the authorized owner mobile number +917074626784 AND verified in /admins collection or claim
+    // 2. OR server-assigned custom claim ownerAdmin == true
+    // 3. OR verified owner email afranonlinecentre@gmail.com
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.phone_number == '+917074626784' && (
+          exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+          request.auth.token.admin == true ||
+          request.auth.token.ownerAdmin == true
+        )) ||
+        request.auth.token.ownerAdmin == true ||
+        (request.auth.token.email == 'afranonlinecentre@gmail.com' && request.auth.token.email_verified == true)
+      );
+    }
+
+    // 1. Authorized Admins Registry
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && (isOwner(adminId) || isAdmin());
+      allow list: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // 2. User Profiles Collection
+    match /users/{userId} {
+      allow get: if isSignedIn() && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isSignedIn() && isOwner(userId) &&
+        incoming().uid == userId &&
+        (incoming().role == 'customer' || (incoming().role == 'ownerAdmin' && isAdmin()));
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (isOwner(userId) && incoming().uid == userId && incoming().role == existing().role)
+      );
+      allow delete: if isAdmin();
+    }
+
+    // 3. Services Catalog Collection
+    match /services/{serviceId} {
+      allow get, list: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // 4. Centre Configuration Collection
+    match /admin_config/{configId} {
+      allow get, list: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // 5. Sensitive Operational Reports Collection (Owner Admin Only)
+    match /reports/{reportId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /admin_reports/{reportId} {
+      allow read, write: if isAdmin();
+    }
+
+    // 6. Applications Collection
+    match /applications/{applicationId} {
+      // Customer can read only their own application. Admin can read all.
+      allow get: if isSignedIn() && (isAdmin() || (resource != null && resource.data.ownerUid == request.auth.uid));
+      allow list: if isSignedIn() && (isAdmin() || resource.data.ownerUid == request.auth.uid);
+
+      // Customer creation: must set ownerUid to themselves, initial status must be Submitted or Draft, payment unpaid
+      allow create: if isSignedIn() && (
+        isAdmin() ||
+        (
+          incoming().ownerUid == request.auth.uid &&
+          (incoming().status == 'Submitted' || incoming().status == 'Draft') &&
+          incoming().paymentStatus == 'Unpaid'
+        )
+      );
+
+      // Application Updates:
+      // - Admin has unrestricted authority to modify status, notes, fees, payment status
+      // - Customer CANNOT modify status directly, CANNOT modify paymentStatus, CANNOT modify fees
+      // - Customer can only submit missing documents or edit draft formData
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (
+          resource.data.ownerUid == request.auth.uid &&
+          incoming().ownerUid == resource.data.ownerUid &&
+          (resource.data.status == 'Draft' || resource.data.status == 'Need Documents') &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['formData', 'documentReferences', 'updatedAt', 'status']) &&
+          (incoming().status == 'Submitted' || incoming().status == 'Draft')
+        )
+      );
+
+      allow delete: if isAdmin() || (
+        isSignedIn() && resource.data.ownerUid == request.auth.uid && resource.data.status == 'Draft'
+      );
+
+      // Status History Subcollection (Audit Trail)
+      match /status_history/{historyId} {
+        allow read: if isSignedIn() && (
+          isAdmin() ||
+          get(/databases/$(database)/documents/applications/$(applicationId)).data.ownerUid == request.auth.uid
+        );
+        allow create: if isSignedIn() && (
+          isAdmin() ||
+          get(/databases/$(database)/documents/applications/$(applicationId)).data.ownerUid == request.auth.uid
+        );
+        allow update, delete: if isAdmin();
+      }
+
+      // Messages Subcollection
+      match /messages/{messageId} {
+        allow read: if isSignedIn() && (
+          isAdmin() ||
+          (
+            get(/databases/$(database)/documents/applications/$(applicationId)).data.ownerUid == request.auth.uid &&
+            resource.data.visibleToCustomer == true
+          )
+        );
+        allow create: if isSignedIn() && (
+          isAdmin() ||
+          (
+            get(/databases/$(database)/documents/applications/$(applicationId)).data.ownerUid == request.auth.uid &&
+            incoming().visibleToCustomer == true &&
+            incoming().senderUid == request.auth.uid
+          )
+        );
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // 7. Payments Collection
+    match /payments/{paymentId} {
+      allow get: if isSignedIn() && (isAdmin() || resource.data.customerUid == request.auth.uid);
+      allow list: if isSignedIn() && (isAdmin() || resource.data.customerUid == request.auth.uid);
+      allow create: if isSignedIn() && (isAdmin() || incoming().customerUid == request.auth.uid);
+      allow update, delete: if isAdmin();
+    }
+
+    // 8. Notifications Collection
+    match /notifications/{notificationId} {
+      allow get: if isSignedIn() && (isAdmin() || resource.data.recipientUid == request.auth.uid);
+      allow list: if isSignedIn() && (isAdmin() || resource.data.recipientUid == request.auth.uid);
+      allow create: if isAdmin();
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (resource.data.recipientUid == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['readAt']))
+      );
+      allow delete: if isSignedIn() && (isAdmin() || resource.data.recipientUid == request.auth.uid);
+    }
+  }
+}

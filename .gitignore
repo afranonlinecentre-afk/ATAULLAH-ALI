@@ -1,0 +1,17 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Android & Capacitor build artifacts
+.gradle/
+android/app/build/
+android/.gradle/
+android/build/
+local.properties
+*.apk
+*.aab
