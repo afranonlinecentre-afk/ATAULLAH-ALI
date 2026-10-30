@@ -32,14 +32,14 @@ jobs:
 
       - name: 2. Verify Project Root and package.json
         run: |
-          echo "Checking project root structure..."
+          echo "Current working directory: $(pwd)"
           if [ ! -f "package.json" ]; then
-            echo "ERROR: package.json not found in root directory!"
-            echo "Directory list:"
+            echo "FATAL ERROR: package.json not found in $(pwd)!"
+            echo "Directory contents:"
             ls -la
             exit 1
           fi
-          echo "Found package.json in project root."
+          echo "Verified package.json in project root."
 
       - name: 3. Setup Node.js (v20)
         uses: actions/setup-node@v4
@@ -48,8 +48,20 @@ jobs:
 
       - name: 4. Install Node Dependencies
         run: |
-          echo "Installing dependencies with npm install..."
-          npm install
+          echo "Configuring npm to bypass peer dependency graph issues..."
+          npm config set legacy-peer-deps true
+          
+          echo "Installing dependencies with legacy-peer-deps..."
+          if [ -f "package-lock.json" ]; then
+            echo "Found package-lock.json. Attempting clean install..."
+            npm ci --legacy-peer-deps || npm install --legacy-peer-deps --no-audit --prefer-offline
+          else
+            echo "No package-lock.json found. Running npm install..."
+            npm install --legacy-peer-deps --no-audit --prefer-offline
+          fi
+          
+          echo "Verifying installed dependencies..."
+          node -e "require('@capacitor/cli'); console.log('Capacitor CLI is ready.');"
 
       - name: 5. Setup Java JDK 17 (Temurin)
         uses: actions/setup-java@v4
