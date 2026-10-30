@@ -2,14 +2,12 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import {
   onAuthStateChanged,
   signOut as fbSignOut,
-  User as FirebaseUser,
-  signInAnonymously
+  User as FirebaseUser
 } from 'firebase/auth';
 import {
   doc,
   getDoc,
-  setDoc,
-  serverTimestamp
+  setDoc
 } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { UserProfile, UserRole, Language } from '../types';
@@ -22,9 +20,9 @@ interface AuthContextType {
   setActiveApp: (app: 'customer' | 'admin') => void;
   lang: Language;
   setLang: (lang: Language) => void;
-  loginWithPhoneOtp: (phone: string, otp: string, role?: UserRole) => Promise<{ success: boolean; error?: string }>;
   setVerifiedAdminSession: (userProfile: UserProfile, fbUser?: FirebaseUser) => void;
-  quickSwitchPersona: (role: UserRole) => Promise<void>;
+  setCustomerSession: (customerProfile: UserProfile, fbUser?: FirebaseUser) => void;
+  quickSwitchPersona: (role: UserRole) => void;
   updateUserProfile: (data: Partial<UserProfile>) => Promise<void>;
   logout: () => Promise<void>;
   isOwnerAdmin: boolean;
@@ -32,7 +30,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const OWNER_EMAIL = 'afranonlinecentre@gmail.com';
+export const OWNER_EMAIL = 'afranonlinecentre@gmail.com';
 export const OWNER_PHONE = '+91 7074626784';
 export const OWNER_PHONE_RAW = '7074626784';
 export const OWNER_PHONE_E164 = '+917074626784';
@@ -44,7 +42,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [activeApp, setActiveApp] = useState<'customer' | 'admin'>('customer');
   const [lang, setLang] = useState<Language>('bn');
 
-  // Load saved preference
+  // Load saved preferences
   useEffect(() => {
     const savedLang = localStorage.getItem('aoc_lang') as Language;
     if (savedLang === 'bn' || savedLang === 'en') {
@@ -66,21 +64,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('aoc_active_app', app);
   };
 
-  // Sync with Firestore user record
-  const syncUserRecord = async (fUser: FirebaseUser, requestedRole?: UserRole): Promise<UserProfile> => {
+  // Sync with Firestore user record based strictly on real Firebase Auth claims & verified phone
+  const syncUserRecord = async (fUser: FirebaseUser): Promise<UserProfile> => {
     const userPhoneDigits = fUser.phoneNumber ? fUser.phoneNumber.replace(/\D/g, '') : '';
     const isOwnerByPhone = userPhoneDigits.endsWith('7074626784');
     const isOwnerByEmail = fUser.email?.toLowerCase() === OWNER_EMAIL.toLowerCase();
-    
+
     // Strict admin role gate: Only authorized phone +917074626784 or owner email can be ownerAdmin
-    let effectiveRole: UserRole = 'customer';
-    if (isOwnerByPhone || isOwnerByEmail) {
-      effectiveRole = 'ownerAdmin';
-    } else if (requestedRole === 'ownerAdmin') {
-      // If requested role is admin but phone does not match, deny admin
-      console.warn('Denied admin privileges for non-authorized credentials');
-      effectiveRole = 'customer';
-    }
+    const effectiveRole: UserRole = (isOwnerByPhone || isOwnerByEmail) ? 'ownerAdmin' : 'customer';
 
     const userDocRef = doc(db, 'users', fUser.uid);
     let profileData: UserProfile;
@@ -89,16 +80,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const snap = await getDoc(userDocRef);
       if (snap.exists()) {
         profileData = snap.data() as UserProfile;
-        // If owner email or requested role is admin, ensure role is ownerAdmin
-        if (effectiveRole === 'ownerAdmin' && profileData.role !== 'ownerAdmin') {
+        // Strictly prevent any unauthorized customer document from carrying ownerAdmin role
+        if (effectiveRole !== 'ownerAdmin' && profileData.role === 'ownerAdmin') {
+          profileData.role = 'customer';
+          await setDoc(userDocRef, { role: 'customer', updatedAt: new Date().toISOString() }, { merge: true });
+        } else if (effectiveRole === 'ownerAdmin' && profileData.role !== 'ownerAdmin') {
           profileData.role = 'ownerAdmin';
           await setDoc(userDocRef, { role: 'ownerAdmin', updatedAt: new Date().toISOString() }, { merge: true });
         }
       } else {
         profileData = {
           uid: fUser.uid,
-          displayName: fUser.displayName || (effectiveRole === 'ownerAdmin' ? 'AFRAN Owner Admin' : 'Customer'),
-          phoneNumber: fUser.phoneNumber || (effectiveRole === 'ownerAdmin' ? OWNER_PHONE : '+91 98765 43210'),
+          displayName: fUser.displayName || (effectiveRole === 'ownerAdmin' ? 'AFRAN Owner Admin (আফরান সেন্টার প্রধান)' : 'সম্মানিত নাগরিক'),
+          phoneNumber: fUser.phoneNumber || (effectiveRole === 'ownerAdmin' ? OWNER_PHONE : ''),
           email: fUser.email || (effectiveRole === 'ownerAdmin' ? OWNER_EMAIL : undefined),
           role: effectiveRole,
           preferredLanguage: lang,
@@ -109,24 +103,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await setDoc(userDocRef, profileData);
       }
 
-      // If ownerAdmin, also write to /admins collection for zero-trust rule validation
+      // If verified ownerAdmin, sync with /admins collection for zero-trust Firestore security rules
       if (profileData.role === 'ownerAdmin') {
         const adminDocRef = doc(db, 'admins', fUser.uid);
         await setDoc(adminDocRef, {
           uid: fUser.uid,
           email: OWNER_EMAIL,
-          phoneNumber: profileData.phoneNumber,
+          phoneNumber: OWNER_PHONE_E164,
           role: 'ownerAdmin',
           createdAt: new Date().toISOString(),
+          verifiedAt: new Date().toISOString(),
         }, { merge: true });
       }
     } catch (e) {
-      console.warn('Could not read or write user doc to Firestore (offline or rule sync), using memory profile:', e);
+      console.warn('Could not read or write user doc to Firestore:', e);
       profileData = {
         uid: fUser.uid,
-        displayName: effectiveRole === 'ownerAdmin' ? 'AFRAN Owner (Verified)' : 'সুমন মণ্ডল (Customer)',
-        phoneNumber: effectiveRole === 'ownerAdmin' ? OWNER_PHONE : '+91 98765 43210',
-        email: effectiveRole === 'ownerAdmin' ? OWNER_EMAIL : 'customer@example.com',
+        displayName: effectiveRole === 'ownerAdmin' ? 'AFRAN Owner Admin (আফরান সেন্টার প্রধান)' : 'সম্মানিত নাগরিক',
+        phoneNumber: fUser.phoneNumber || (effectiveRole === 'ownerAdmin' ? OWNER_PHONE : ''),
+        email: effectiveRole === 'ownerAdmin' ? OWNER_EMAIL : undefined,
         role: effectiveRole,
         preferredLanguage: lang,
         accountStatus: 'active',
@@ -139,173 +134,82 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
+    // Listen for real Firebase Auth state changes
+    // IMPORTANT: Never call signInAnonymously() here as it triggers auth/admin-restricted-operation
     const unsubscribe = onAuthStateChanged(auth, async (currentFbUser) => {
       setFbUser(currentFbUser);
       if (currentFbUser) {
         try {
           const profile = await syncUserRecord(currentFbUser);
           setUser(profile);
+          // If the verified user is ownerAdmin, allow admin app if previously requested
+          if (profile.role === 'ownerAdmin') {
+            const savedApp = localStorage.getItem('aoc_active_app');
+            if (savedApp === 'admin') {
+              setActiveApp('admin');
+            }
+          }
         } catch (err) {
           console.error('Error syncing auth profile:', err);
         }
       } else {
-        // Auto initialize default verified session for seamless preview if empty
-        try {
-          const anon = await signInAnonymously(auth);
-          const profile = await syncUserRecord(anon.user, 'customer');
-          setUser(profile);
-        } catch (e) {
-          console.warn('Anonymous sign-in fallback:', e);
-          const mockUser: UserProfile = {
-            uid: 'customer-local-demo',
-            displayName: 'সুমন বিশ্বাস (Suman Biswas)',
-            phoneNumber: '+91 98765 43210',
-            email: 'customer.wb@example.com',
-            role: 'customer',
-            preferredLanguage: 'bn',
-            accountStatus: 'active',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          };
-          setUser(mockUser);
-        }
+        // User is unauthenticated. Do NOT call signInAnonymously.
+        setUser(null);
       }
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [lang]);
 
-  const loginWithPhoneOtp = async (
-    phone: string,
-    otp: string,
-    role: UserRole = 'customer'
-  ): Promise<{ success: boolean; error?: string }> => {
-    // In production mobile app, Firebase Phone Auth sends SMS.
-    // For test environment & verification, accept valid OTP (e.g., 123456 or 6 digits)
-    if (!otp || otp.length < 6) {
-      return { success: false, error: lang === 'bn' ? 'অনুগ্রহ করে সঠিক ৬ সংখ্যার ওটিপি দিন।' : 'Please enter valid 6-digit OTP.' };
+  // Trusted setter called exclusively when real OTP for +91 7074626784 is verified
+  const setVerifiedAdminSession = (adminProfile: UserProfile, newFbUser?: FirebaseUser) => {
+    // Strictly verify that the profile belongs to the authorized owner
+    const phoneDigits = (adminProfile.phoneNumber || '').replace(/\D/g, '');
+    const isOwner = phoneDigits.endsWith('7074626784') || adminProfile.email === OWNER_EMAIL;
+
+    if (!isOwner) {
+      console.error('Rejected unauthorized attempt to set admin session');
+      return;
     }
 
-    if (!phone || phone.length < 10) {
-      return { success: false, error: lang === 'bn' ? 'অনুগ্রহ করে সঠিক ১০ সংখ্যার মোবাইল নম্বর দিন।' : 'Please enter valid 10-digit phone number.' };
-    }
-
-    const cleanDigits = phone.replace(/\D/g, '');
-    const isOwnerPhone = cleanDigits.endsWith('7074626784');
-
-    if (role === 'ownerAdmin' && !isOwnerPhone) {
-      return {
-        success: false,
-        error: lang === 'bn'
-          ? 'অননুমোদিত নম্বর: শুধুমাত্র মালিকের অনুমোদিত মোবাইল নম্বর (+91 7074626784) দিয়েই অ্যাডমিন লগইন সম্ভব।'
-          : 'Unauthorized number: Only the authorized owner mobile (+91 7074626784) is permitted for Owner Admin access.'
-      };
-    }
-
-    try {
-      let currentFb = auth.currentUser;
-      if (!currentFb) {
-        const cred = await signInAnonymously(auth);
-        currentFb = cred.user;
-      }
-
-      const cleanPhone = phone.startsWith('+91') ? phone : `+91 ${phone.trim()}`;
-      const isOwner = role === 'ownerAdmin' || isOwnerPhone;
-
-      const profile: UserProfile = {
-        uid: currentFb.uid,
-        displayName: isOwner ? 'আফরান সেন্টার প্রধান (AFRAN Owner Admin)' : (user?.displayName || 'সুমন মণ্ডল'),
-        phoneNumber: cleanPhone,
-        email: isOwner ? OWNER_EMAIL : (user?.email || 'customer@example.com'),
-        role: isOwner ? 'ownerAdmin' : 'customer',
-        preferredLanguage: lang,
-        accountStatus: 'active',
-        createdAt: user?.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      try {
-        await setDoc(doc(db, 'users', currentFb.uid), profile, { merge: true });
-        if (isOwner) {
-          await setDoc(doc(db, 'admins', currentFb.uid), {
-            uid: currentFb.uid,
-            email: OWNER_EMAIL,
-            phoneNumber: OWNER_PHONE_E164,
-            role: 'ownerAdmin',
-            createdAt: new Date().toISOString(),
-          }, { merge: true });
-        }
-      } catch (err) {
-        console.warn('Persisting profile error (continuing with state):', err);
-      }
-
-      setUser(profile);
-      if (isOwner) {
-        setActiveApp('admin');
-      }
-      return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err?.message || 'Login failed' };
-    }
-  };
-
-  const setVerifiedAdminSession = (userProfile: UserProfile, newFbUser?: FirebaseUser) => {
     if (newFbUser) {
       setFbUser(newFbUser);
     }
-    setUser(userProfile);
+    setUser({ ...adminProfile, role: 'ownerAdmin' });
     setActiveApp('admin');
     localStorage.setItem('aoc_active_app', 'admin');
   };
 
-  const quickSwitchPersona = async (targetRole: UserRole) => {
-    setLoading(true);
-    let currentFb = auth.currentUser;
-    if (!currentFb) {
-      try {
-        const cred = await signInAnonymously(auth);
-        currentFb = cred.user;
-      } catch (e) {
-        console.warn(e);
+  // Trusted setter for customer session
+  const setCustomerSession = (customerProfile: UserProfile, newFbUser?: FirebaseUser) => {
+    if (newFbUser) {
+      setFbUser(newFbUser);
+    }
+    setUser({ ...customerProfile, role: 'customer' });
+  };
+
+  // Safe navigation between customer and admin interfaces.
+  // Never bypasses authentication: switching to admin strictly triggers login if not verified.
+  const quickSwitchPersona = (targetRole: UserRole) => {
+    if (targetRole === 'customer') {
+      setActiveApp('customer');
+      localStorage.setItem('aoc_active_app', 'customer');
+    } else if (targetRole === 'ownerAdmin') {
+      // Check if already verified as owner
+      const isVerifiedOwner =
+        user?.role === 'ownerAdmin' &&
+        (user.phoneNumber?.replace(/\D/g, '').endsWith('7074626784') || user.email === OWNER_EMAIL);
+
+      setActiveApp('admin');
+      localStorage.setItem('aoc_active_app', 'admin');
+
+      // If not verified, AdminApp will safely render OwnerAdminLoginScreen
+      if (!isVerifiedOwner && user) {
+        // Reset role to customer so owner admin login screen must be completed
+        setUser({ ...user, role: 'customer' });
       }
     }
-
-    const uid = currentFb?.uid || (targetRole === 'ownerAdmin' ? 'afran-owner-uid' : 'customer-demo-uid');
-    const isOwner = targetRole === 'ownerAdmin';
-
-    const newProfile: UserProfile = {
-      uid,
-      displayName: isOwner ? 'আফরান সেন্টার প্রধান (AFRAN Owner Admin)' : 'সুমন বিশ্বাস (Suman Biswas)',
-      phoneNumber: isOwner ? OWNER_PHONE : '+91 98765 43210',
-      email: isOwner ? OWNER_EMAIL : 'suman.biswas@example.com',
-      role: targetRole,
-      preferredLanguage: lang,
-      accountStatus: 'active',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    if (currentFb) {
-      try {
-        await setDoc(doc(db, 'users', uid), newProfile, { merge: true });
-        if (isOwner) {
-          await setDoc(doc(db, 'admins', uid), {
-            uid,
-            email: OWNER_EMAIL,
-            phoneNumber: OWNER_PHONE,
-            role: 'ownerAdmin',
-            createdAt: new Date().toISOString()
-          }, { merge: true });
-        }
-      } catch (e) {
-        console.warn('Could not write persona to firestore:', e);
-      }
-    }
-
-    setUser(newProfile);
-    setActiveApp(isOwner ? 'admin' : 'customer');
-    setLoading(false);
   };
 
   const updateUserProfile = async (data: Partial<UserProfile>) => {
@@ -327,8 +231,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (e) {
       console.warn('Error signing out:', e);
     }
+    setFbUser(null);
     setUser(null);
+    setActiveApp('customer');
+    localStorage.setItem('aoc_active_app', 'customer');
   };
+
+  // Strictly verify ownerAdmin: Must have role 'ownerAdmin' AND phone must match +91 7074626784 (or owner email)
+  const isOwnerAdmin = Boolean(
+    user?.role === 'ownerAdmin' &&
+    ((user.phoneNumber && user.phoneNumber.replace(/\D/g, '').endsWith('7074626784')) ||
+     (user.email && user.email.toLowerCase() === OWNER_EMAIL.toLowerCase()))
+  );
 
   return (
     <AuthContext.Provider
@@ -340,12 +254,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setActiveApp: changeActiveApp,
         lang,
         setLang: changeLanguage,
-        loginWithPhoneOtp,
         setVerifiedAdminSession,
+        setCustomerSession,
         quickSwitchPersona,
         updateUserProfile,
         logout,
-        isOwnerAdmin: user?.role === 'ownerAdmin',
+        isOwnerAdmin,
       }}
     >
       {children}

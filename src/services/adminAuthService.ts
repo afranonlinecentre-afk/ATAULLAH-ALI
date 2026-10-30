@@ -7,6 +7,7 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
+import { UserProfile } from '../types';
 
 export const AUTHORIZED_ADMIN_PHONE = '+917074626784';
 export const AUTHORIZED_ADMIN_PHONE_DISPLAY = '+91 7074626784';
@@ -48,10 +49,27 @@ export function formatToE164(phone: string): string {
 }
 
 /**
- * Initialize RecaptchaVerifier for real Firebase Phone Authentication
+ * Initialize RecaptchaVerifier safely for real Firebase Phone Authentication.
+ * Ensures the target container exists and does not have display:none which breaks reCAPTCHA.
  */
 export function initRecaptchaVerifier(containerId: string): RecaptchaVerifier {
-  // Clear any existing verifier
+  let containerEl = document.getElementById(containerId);
+  if (!containerEl) {
+    containerEl = document.createElement('div');
+    containerEl.id = containerId;
+    document.body.appendChild(containerEl);
+  }
+
+  // Remove any conflicting display:none or hidden class that breaks reCAPTCHA token generation
+  containerEl.classList.remove('hidden');
+  containerEl.style.position = 'fixed';
+  containerEl.style.bottom = '0';
+  containerEl.style.right = '0';
+  containerEl.style.opacity = '0';
+  containerEl.style.pointerEvents = 'none';
+  containerEl.style.zIndex = '1';
+
+  // Clear existing verifier instance if any
   if (window.recaptchaVerifier) {
     try {
       window.recaptchaVerifier.clear();
@@ -60,7 +78,7 @@ export function initRecaptchaVerifier(containerId: string): RecaptchaVerifier {
     }
   }
 
-  const verifier = new RecaptchaVerifier(auth, containerId, {
+  const verifier = new RecaptchaVerifier(auth, containerEl, {
     size: 'invisible',
     callback: () => {
       // reCAPTCHA solved
@@ -75,13 +93,16 @@ export function initRecaptchaVerifier(containerId: string): RecaptchaVerifier {
 }
 
 /**
- * Translate Firebase Authentication errors to clear, actionable Bengali messages
+ * Translate Firebase Authentication errors to clear, actionable Bengali messages.
+ * Directly addresses auth/admin-restricted-operation and phone auth setup requirements.
  */
 export function getBengaliAuthErrorMessage(error: any): string {
   const code = error?.code || '';
   const message = error?.message || '';
 
   switch (code) {
+    case 'auth/admin-restricted-operation':
+      return 'ফায়ারবেস অথেন্টিকেশনে এই অপারেশনটি অ্যাডমিন-সীমাবদ্ধ (admin-restricted-operation)। অনুগ্রহ করে নিশ্চিত করুন যে Firebase Console > Authentication > Settings এ "Allow users to sign up" সক্রিয় আছে এবং Sign-in method এ Phone Auth চালু রয়েছে।';
     case 'auth/operation-not-allowed':
       return 'ফায়ারবেস কনসোলে Phone Authentication (SMS) সক্রিয় করা হয়নি। অনুগ্রহ করে Firebase Console > Authentication > Sign-in method এ গিয়ে Phone সক্রিয় করুন।';
     case 'auth/invalid-phone-number':
@@ -102,6 +123,8 @@ export function getBengaliAuthErrorMessage(error: any): string {
       return 'নেটওয়ার্ক সংযোগ ত্রুটি। ইন্টারনেট সংযোগ পরীক্ষা করে পুনরায় চেষ্টা করুন।';
     case 'auth/unauthorized-domain':
       return 'এই ডোমেনটি ফায়ারবেসের অনুমোদিত তালিকায় (Authorized Domains) যুক্ত নেই। Firebase Console > Authentication > Settings এ ডোমেনটি যোগ করুন।';
+    case 'auth/user-disabled':
+      return 'এই অ্যাকাউন্টটি ফায়ারবেস কনসোল থেকে সাময়িকভাবে নিষ্ক্রিয় করা হয়েছে।';
     default:
       if (message.includes('reCAPTCHA') || message.includes('recaptcha')) {
         return 'reCAPTCHA যাচাইকরণ সম্পন্ন হয়নি। অনুগ্রহ করে পুনরায় চেষ্টা করুন।';
@@ -210,6 +233,99 @@ export async function verifyAdminSmsOtp(
     };
   } catch (error: any) {
     console.error('Firebase confirm OTP error:', error);
+    return {
+      success: false,
+      error: getBengaliAuthErrorMessage(error),
+      errorCode: error?.code || 'UNKNOWN_ERROR'
+    };
+  }
+}
+
+/**
+ * Send real SMS OTP to customer phone
+ */
+export async function sendCustomerSmsOtp(
+  phoneInput: string,
+  containerId: string = 'customer-recaptcha-container'
+): Promise<PhoneOtpResult> {
+  const formattedPhone = formatToE164(phoneInput);
+  const cleanDigits = phoneInput.replace(/\D/g, '');
+
+  if (cleanDigits.length < 10) {
+    return {
+      success: false,
+      error: 'অনুগ্রহ করে সঠিক ১০ সংখ্যার ভারতীয় মোবাইল নম্বর দিন।'
+    };
+  }
+
+  // Prevent admin phone from logging in via Customer portal
+  if (formattedPhone === AUTHORIZED_ADMIN_PHONE || cleanDigits.endsWith('7074626784')) {
+    return {
+      success: false,
+      error: 'এই নম্বরটি (+91 7074626784) সেন্টারের অনুমোদিত মালিক অ্যাডমিন নম্বর। অ্যাডমিন ড্যাশবোর্ডে প্রবেশ করতে অনুগ্রহ করে মালিক অ্যাডমিন লগইন ব্যবহার করুন।'
+    };
+  }
+
+  try {
+    const appVerifier = initRecaptchaVerifier(containerId);
+    const confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
+    return {
+      success: true,
+      confirmationResult
+    };
+  } catch (error: any) {
+    console.error('Customer Phone Auth send OTP error:', error);
+    return {
+      success: false,
+      error: getBengaliAuthErrorMessage(error),
+      errorCode: error?.code || 'UNKNOWN_ERROR'
+    };
+  }
+}
+
+/**
+ * Verify received SMS OTP for Customer
+ */
+export async function verifyCustomerSmsOtp(
+  confirmationResult: ConfirmationResult,
+  otpCode: string,
+  name?: string
+): Promise<VerifyOtpResult> {
+  if (!otpCode || otpCode.trim().length !== 6) {
+    return {
+      success: false,
+      error: 'অনুগ্রহ করে এসএমএসে প্রাপ্ত সঠিক ৬ সংখ্যার ওটিপি (OTP) লিখুন।'
+    };
+  }
+
+  try {
+    const credential: UserCredential = await confirmationResult.confirm(otpCode.trim());
+    const fbUser = credential.user;
+
+    // Strict customer profile update (never grant admin role)
+    const customerProfile: UserProfile = {
+      uid: fbUser.uid,
+      displayName: name || fbUser.displayName || 'সম্মানিত নাগরিক',
+      phoneNumber: fbUser.phoneNumber || '',
+      role: 'customer',
+      preferredLanguage: 'bn',
+      accountStatus: 'active',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    try {
+      await setDoc(doc(db, 'users', fbUser.uid), customerProfile, { merge: true });
+    } catch (e) {
+      console.warn('Customer firestore update error:', e);
+    }
+
+    return {
+      success: true,
+      user: fbUser
+    };
+  } catch (error: any) {
+    console.error('Customer verify OTP error:', error);
     return {
       success: false,
       error: getBengaliAuthErrorMessage(error),
