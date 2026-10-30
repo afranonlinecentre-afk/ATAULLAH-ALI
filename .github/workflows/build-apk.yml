@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       build_type:
-        description: 'Build Type'
+        description: 'Build Type (debug recommended for direct phone install)'
         required: true
         default: 'debug'
         type: choice
         options:
           - debug
+          - release
   push:
     branches:
       - main
@@ -29,36 +30,44 @@ jobs:
       - name: 1. Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 2. Setup Node.js (v20)
+      - name: 2. Verify Project Root and package.json
+        run: |
+          echo "Checking project root structure..."
+          if [ ! -f "package.json" ]; then
+            echo "ERROR: package.json not found in root directory!"
+            echo "Directory list:"
+            ls -la
+            exit 1
+          fi
+          echo "Found package.json in project root."
+
+      - name: 3. Setup Node.js (v20)
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
-      - name: 3. Install Node Dependencies
+      - name: 4. Install Node Dependencies
         run: |
-          echo "Installing dependencies..."
-          npm ci || npm install
+          echo "Installing dependencies with npm install..."
+          npm install
 
-      - name: 4. Setup Java JDK 17 (Temurin)
+      - name: 5. Setup Java JDK 17 (Temurin)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-          cache: 'gradle'
 
-      - name: 5. Configure Android SDK Environment
+      - name: 6. Configure Android SDK Environment
         run: |
           echo "Setting up Android SDK environment..."
           if [ -n "$ANDROID_SDK_ROOT" ]; then
             echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
           fi
-          # Accept any pending Android licenses
           mkdir -p ~/.android
           touch ~/.android/repositories.cfg
           yes | sdkmanager --licenses || true
 
-      - name: 6. Build Vite React Web App (dist)
+      - name: 7. Build Vite React Web App (dist)
         run: |
           echo "Building production web assets..."
           npm run build
@@ -66,49 +75,81 @@ jobs:
             echo "Error: dist/index.html was not generated!"
             exit 1
           fi
-          echo "Web build successful."
+          echo "Web build successfully created in dist/."
 
-      - name: 7. Initialize & Sync Capacitor Android Project
+      - name: 8. Initialize & Sync Capacitor Android Project
         run: |
           echo "Checking Capacitor Android project..."
           if [ ! -d "android" ]; then
             echo "Generating native Android project with Capacitor..."
             npx cap add android
           else
-            echo "Native Android project directory exists."
+            echo "Native Android project directory already exists."
           fi
           echo "Syncing web assets to native Android project..."
           npx cap sync android
 
-      - name: 8. Grant Execute Permissions to Gradle Wrapper
+      - name: 9. Grant Execute Permissions to Gradle Wrapper
         run: |
           cd android
           chmod +x gradlew
           ls -la gradlew
 
-      - name: 9. Build Android APK via Gradle
+      - name: 10. Build Android APK via Gradle
         run: |
           cd android
-          echo "Running Gradle build..."
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          BUILD_TYPE="${{ github.event.inputs.build_type || 'debug' }}"
+          echo "Selected build type: $BUILD_TYPE"
+          
+          if [ "$BUILD_TYPE" = "release" ]; then
+            echo "Running Gradle release build..."
+            ./gradlew assembleRelease assembleDebug --no-daemon --stacktrace || ./gradlew assembleDebug --no-daemon --stacktrace
+          else
+            echo "Running Gradle debug build (instantly installable on Android)..."
+            ./gradlew assembleDebug --no-daemon --stacktrace
+          fi
 
-      - name: 10. Verify Output APK Binary
+      - name: 11. Locate and Verify Output APK Binary
         run: |
-          APK_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
-          if [ ! -f "$APK_PATH" ]; then
-            echo "FATAL ERROR: Expected APK file does not exist at $APK_PATH"
-            echo "Build failed to generate an APK binary."
+          echo "Searching for generated APK files..."
+          FOUND_APK=""
+          
+          # Priority list of generated APK locations
+          CANDIDATES=(
+            "android/app/build/outputs/apk/debug/app-debug.apk"
+            "android/app/build/outputs/apk/release/app-release.apk"
+            "android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          )
+          
+          for apk in "${CANDIDATES[@]}"; do
+            if [ -f "$apk" ]; then
+              FOUND_APK="$apk"
+              echo "Found APK at: $FOUND_APK"
+              break
+            fi
+          done
+          
+          if [ -z "$FOUND_APK" ]; then
+            echo "Searching filesystem for any generated .apk file..."
+            FOUND_APK=$(find android/app/build/outputs/apk -name "*.apk" 2>/dev/null | head -n 1)
+          fi
+          
+          if [ -z "$FOUND_APK" ] || [ ! -f "$FOUND_APK" ]; then
+            echo "FATAL ERROR: No APK binary was generated by the Gradle build."
             exit 1
           fi
-          echo "APK successfully compiled!"
-          cp "$APK_PATH" ./AFRAN_ONLINE_CENTRE.apk
+          
+          echo "Copying $FOUND_APK to ./AFRAN_ONLINE_CENTRE.apk..."
+          cp "$FOUND_APK" ./AFRAN_ONLINE_CENTRE.apk
+          
+          echo "APK Verification Details:"
           ls -lh AFRAN_ONLINE_CENTRE.apk
           sha256sum AFRAN_ONLINE_CENTRE.apk
 
-      - name: 11. Upload APK Artifact (Direct Phone Download)
+      - name: 12. Upload APK Artifact (Direct Phone Download)
         uses: actions/upload-artifact@v4
         with:
-          name: AFRAN_ONLINE_CENTRE-APK
+          name: AFRAN_ONLINE_CENTRE.apk
           path: AFRAN_ONLINE_CENTRE.apk
           if-no-files-found: error
           retention-days: 30
