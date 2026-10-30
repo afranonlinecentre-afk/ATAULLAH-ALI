@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       build_type:
-        description: 'Build Type (debug recommended for direct phone install)'
+        description: 'Build Type'
         required: true
-        default: 'debug'
+        default: 'release'
         type: choice
         options:
-          - debug
           - release
+          - debug
   push:
     branches:
       - main
@@ -41,10 +41,10 @@ jobs:
           fi
           echo "Verified package.json in project root."
 
-      - name: 3. Setup Node.js (v20)
+      - name: 3. Setup Node.js (v22)
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: 4. Install Node Dependencies
         run: |
@@ -124,14 +124,21 @@ jobs:
       - name: 11. Locate and Verify Output APK Binary
         run: |
           echo "Searching for generated APK files..."
-          FOUND_APK=""
+          BUILD_TYPE="${{ github.event.inputs.build_type || 'release' }}"
           
-          # Priority list of generated APK locations
-          CANDIDATES=(
-            "android/app/build/outputs/apk/debug/app-debug.apk"
-            "android/app/build/outputs/apk/release/app-release.apk"
-            "android/app/build/outputs/apk/release/app-release-unsigned.apk"
-          )
+          if [ "$BUILD_TYPE" = "release" ]; then
+            CANDIDATES=(
+              "android/app/build/outputs/apk/release/app-release.apk"
+              "android/app/build/outputs/apk/release/app-release-unsigned.apk"
+              "android/app/build/outputs/apk/debug/app-debug.apk"
+            )
+          else
+            CANDIDATES=(
+              "android/app/build/outputs/apk/debug/app-debug.apk"
+              "android/app/build/outputs/apk/release/app-release.apk"
+              "android/app/build/outputs/apk/release/app-release-unsigned.apk"
+            )
+          fi
           
           for apk in "${CANDIDATES[@]}"; do
             if [ -f "$apk" ]; then
