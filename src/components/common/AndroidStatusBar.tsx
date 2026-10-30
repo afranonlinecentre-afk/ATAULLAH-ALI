@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Wifi, BatteryMedium, Signal } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 
 interface AndroidStatusBarProps {
   dark?: boolean;
@@ -19,6 +20,15 @@ export const AndroidStatusBar: React.FC<AndroidStatusBarProps> = ({ dark = false
     const interval = setInterval(updateTime, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // When running inside the native Android APK (Capacitor) or in standalone mobile mode,
+  // the Android OS already provides the real system status bar. Do not render a fake one.
+  const isRealNativeApp = Capacitor.isNativePlatform() || 
+    (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+
+  if (isRealNativeApp) {
+    return null;
+  }
 
   return (
     <div

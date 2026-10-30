@@ -18,7 +18,11 @@ import { DownloadHub } from '../download/DownloadHub';
 import { useAuth } from '../../context/AuthContext';
 import { translations } from '../../lib/i18n';
 
-export const DeviceFrame: React.FC = () => {
+interface DeviceFrameProps {
+  onLaunchFullscreen?: () => void;
+}
+
+export const DeviceFrame: React.FC<DeviceFrameProps> = ({ onLaunchFullscreen }) => {
   const { activeApp, setActiveApp, lang, setLang, user, quickSwitchPersona, isOwnerAdmin } = useAuth();
   const t = translations[lang];
 
@@ -133,6 +137,18 @@ export const DeviceFrame: React.FC = () => {
               <Minimize2 className="w-4 h-4" />
             )}
           </button>
+
+          {/* Launch Pure Mobile App View Directly */}
+          {onLaunchFullscreen && (
+            <button
+              onClick={onLaunchFullscreen}
+              className="hidden lg:flex items-center gap-1.5 py-1.5 px-2.5 bg-emerald-600/90 hover:bg-emerald-600 text-white rounded-xl text-xs font-semibold transition cursor-pointer shadow-xs"
+              title="Preview pure full-screen mobile app (no mockup)"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span className="text-[11px]">{lang === 'bn' ? 'সরাসরি অ্যাপ' : 'Direct App'}</span>
+            </button>
+          )}
         </div>
       </header>
 

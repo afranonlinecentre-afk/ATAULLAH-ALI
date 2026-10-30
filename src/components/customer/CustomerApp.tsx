@@ -88,7 +88,10 @@ export const CustomerApp: React.FC = () => {
       <AndroidStatusBar dark={false} />
 
       {/* Main Top App Header */}
-      <div className="bg-[#1267B1] text-white px-4 py-3 flex items-center justify-between shadow-xs shrink-0">
+      <div
+        className="bg-[#1267B1] text-white px-4 py-3 flex items-center justify-between shadow-xs shrink-0"
+        style={{ paddingTop: 'max(env(safe-area-inset-top), 0.75rem)' }}
+      >
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-xl bg-white/15 flex items-center justify-center font-bold text-sm tracking-wider border border-white/20">
             AOC
@@ -220,7 +223,10 @@ export const CustomerApp: React.FC = () => {
       </div>
 
       {/* Material 3 Bottom Navigation Bar */}
-      <div className="bg-white border-t border-slate-200/90 py-1.5 px-3 flex items-center justify-around shrink-0 z-30 shadow-md">
+      <div
+        className="bg-white border-t border-slate-200/90 py-1.5 px-3 flex items-center justify-around shrink-0 z-30 shadow-md"
+        style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.375rem)' }}
+      >
         <button
           onClick={() => {
             setCurrentTab('home');

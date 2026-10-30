@@ -10,7 +10,8 @@ import {
   ArrowRight,
   LogOut,
   Sparkles,
-  Download
+  Download,
+  Smartphone
 } from 'lucide-react';
 import { AndroidStatusBar } from '../common/AndroidStatusBar';
 import { AdminDashboard } from './AdminDashboard';
@@ -58,7 +59,10 @@ export const AdminApp: React.FC = () => {
       <AndroidStatusBar dark={true} />
 
       {/* Admin App Top Header */}
-      <div className="bg-slate-900 text-white px-4 py-3 flex items-center justify-between shrink-0 shadow-sm border-b border-slate-800">
+      <div
+        className="bg-slate-900 text-white px-4 py-3 flex items-center justify-between shrink-0 shadow-sm border-b border-slate-800"
+        style={{ paddingTop: 'max(env(safe-area-inset-top), 0.75rem)' }}
+      >
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold text-xs border border-cyan-500/40">
             ADM
@@ -74,6 +78,16 @@ export const AdminApp: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Quick Return to Customer App */}
+          <button
+            onClick={() => setActiveApp('customer')}
+            className="px-2 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-cyan-200 text-[10px] font-semibold border border-slate-700 transition flex items-center gap-1 cursor-pointer"
+            title={lang === 'bn' ? 'গ্রাহক অ্যাপে ফিরে যান' : 'Back to Customer App'}
+          >
+            <Smartphone className="w-3 h-3 text-cyan-400" />
+            <span>{lang === 'bn' ? 'গ্রাহক অ্যাপ' : 'Customer'}</span>
+          </button>
+
           <button
             onClick={() => setShowAdminDownloadHub(true)}
             className="p-1.5 rounded-full hover:bg-slate-800 text-cyan-400 transition cursor-pointer"
@@ -117,7 +131,10 @@ export const AdminApp: React.FC = () => {
       </div>
 
       {/* Material 3 Bottom Navigation Bar for Owner Admin */}
-      <div className="bg-white border-t border-slate-200/90 py-1.5 px-2 flex items-center justify-around shrink-0 z-30 shadow-md">
+      <div
+        className="bg-white border-t border-slate-200/90 py-1.5 px-2 flex items-center justify-around shrink-0 z-30 shadow-md"
+        style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.375rem)' }}
+      >
         <button
           onClick={() => setActiveTab('dashboard')}
           className={`flex flex-col items-center gap-0.5 py-1 px-2 rounded-xl transition cursor-pointer ${
